@@ -166,6 +166,7 @@ def chat_endpoint(req: ChatRequest):
     - "Move my morning stand-up to 10 AM tomorrow"
     - "Cancel my doctor appointment"
     """
+    import traceback
     from agent import chat
 
     session_id = req.session_id or str(uuid.uuid4())
@@ -174,7 +175,8 @@ def chat_endpoint(req: ChatRequest):
     try:
         reply, updated_history = chat(req.message, history)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        error_detail = f"{type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
 
     _sessions[session_id] = updated_history
     turn = sum(1 for m in updated_history if m["role"] == "human")
