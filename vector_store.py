@@ -18,8 +18,7 @@ from typing import Any
 
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Embeddings
-from google import genai
-from google.genai import types as genai_types
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,7 +26,6 @@ load_dotenv()
 # ── Configuration ─────────────────────────────────────────────────────────────
 CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
 COLLECTION_NAME: str = "schedule_events"
-EMBED_MODEL: str = "gemini-embedding-exp-03-07"  # Google free embedding model (new SDK)
 DEFAULT_TOP_K: int = 5
 
 # ── Singleton client & collection ─────────────────────────────────────────────
@@ -35,29 +33,26 @@ _client: chromadb.PersistentClient | None = None
 _collection: chromadb.Collection | None = None
 
 
-class GeminiEmbedder(EmbeddingFunction):
-    """Embedding function using the new google-genai SDK (free tier)."""
+class LangChainGoogleEmbedder(EmbeddingFunction):
+    """
+    Wraps LangChain's GoogleGenerativeAIEmbeddings as a ChromaDB EmbeddingFunction.
+    Uses models/embedding-001 by default — stable, free, and well-tested.
+    """
 
     def __init__(self):
-        self._genai_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        self._embedder = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+            google_api_key=os.getenv("GOOGLE_API_KEY"),
+            task_type="retrieval_document",
+        )
 
     def __call__(self, input: list[str]) -> Embeddings:
-        result = []
-        for text in input:
-            response = self._genai_client.models.embed_content(
-                model=EMBED_MODEL,
-                contents=text,
-                config=genai_types.EmbedContentConfig(
-                    task_type="RETRIEVAL_DOCUMENT"
-                ),
-            )
-            result.append(response.embeddings[0].values)
-        return result
+        return self._embedder.embed_documents(input)
 
 
-def _embed_fn() -> GeminiEmbedder:
-    """Return a GeminiEmbedder instance."""
-    return GeminiEmbedder()
+def _embed_fn() -> LangChainGoogleEmbedder:
+    """Return a LangChainGoogleEmbedder instance."""
+    return LangChainGoogleEmbedder()
 
 
 def get_collection() -> chromadb.Collection:
