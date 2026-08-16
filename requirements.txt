@@ -1,0 +1,21 @@
+# Core LLM / Agent framework
+langgraph==1.0.0
+langgraph-prebuilt==0.1.0
+langchain==0.3.25
+langchain-core==0.3.60
+langchain-openai==0.3.17
+
+# Vector store
+chromadb==0.5.23
+
+# Embeddings (sentence-transformers for local, no extra API key needed)
+sentence-transformers==3.3.1
+
+# API server
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+
+# Utilities
+python-dotenv==1.0.1
+python-dateutil==2.9.0
