@@ -1,24 +1,23 @@
 """
 vector_store.py
 ---------------
-ChromaDB setup and RAG pipeline.
+ChromaDB-backed schedule store.
 
-Responsibilities:
-  - Initialize / load a persistent ChromaDB collection.
-  - Ingest schedule events (create document text + metadata).
-  - Semantic search: retrieve the k most relevant events for a query.
-  - CRUD helpers used by the agent tools (add / update / delete).
+Uses ChromaDB purely as a persistent document + metadata store.
+Embeddings are disabled — all retrieval is done via:
+  1. Exact metadata filters  (date, type)
+  2. Keyword search in documents (for free-text queries)
+
+This approach requires zero external embedding APIs and works on any free tier.
 """
 
 from __future__ import annotations
 
 import os
-import json
 from typing import Any
 
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Embeddings
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,33 +25,22 @@ load_dotenv()
 # ── Configuration ─────────────────────────────────────────────────────────────
 CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
 COLLECTION_NAME: str = "schedule_events"
-DEFAULT_TOP_K: int = 5
+DEFAULT_TOP_K: int = 8
+
+# ── Dummy embedding function (stores zero vectors — we never query by vector) ──
+class DummyEmbedder(EmbeddingFunction):
+    """
+    Returns a fixed 1-dim zero vector for every document.
+    We never use vector similarity search — all queries are metadata/keyword based.
+    This lets us use ChromaDB as a pure document store without any embedding API.
+    """
+    def __call__(self, input: list[str]) -> Embeddings:
+        return [[0.0] for _ in input]
+
 
 # ── Singleton client & collection ─────────────────────────────────────────────
 _client: chromadb.PersistentClient | None = None
 _collection: chromadb.Collection | None = None
-
-
-class LangChainGoogleEmbedder(EmbeddingFunction):
-    """
-    Wraps LangChain's GoogleGenerativeAIEmbeddings as a ChromaDB EmbeddingFunction.
-    Uses models/embedding-001 by default — stable, free, and well-tested.
-    """
-
-    def __init__(self):
-        self._embedder = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=os.getenv("GOOGLE_API_KEY"),
-            task_type="retrieval_document",
-        )
-
-    def __call__(self, input: list[str]) -> Embeddings:
-        return self._embedder.embed_documents(input)
-
-
-def _embed_fn() -> LangChainGoogleEmbedder:
-    """Return a LangChainGoogleEmbedder instance."""
-    return LangChainGoogleEmbedder()
 
 
 def get_collection() -> chromadb.Collection:
@@ -62,23 +50,19 @@ def get_collection() -> chromadb.Collection:
         _client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
         _collection = _client.get_or_create_collection(
             name=COLLECTION_NAME,
-            embedding_function=_embed_fn(),
-            metadata={"hnsw:space": "cosine"},
+            embedding_function=DummyEmbedder(),
         )
     return _collection
 
 
-# ── Document text builder ──────────────────────────────────────────────────────
+# ── Document builder ──────────────────────────────────────────────────────────
 def _event_to_doc(event: dict) -> str:
-    """
-    Convert an event dict to a rich natural-language document.
-    This text is what gets embedded and searched semantically.
-    """
+    """Build a searchable text document from an event dict."""
     parts = [
-        f"Event: {event['title']}",
-        f"Date: {event['date']}",
-        f"Time: {event['start_time']} to {event['end_time']}",
-        f"Type: {event['type']}",
+        f"Event: {event.get('title', '')}",
+        f"Date: {event.get('date', '')}",
+        f"Time: {event.get('start_time', '')} to {event.get('end_time', '')}",
+        f"Type: {event.get('type', '')}",
     ]
     if event.get("location"):
         parts.append(f"Location: {event['location']}")
@@ -92,91 +76,78 @@ def _event_to_doc(event: dict) -> str:
 def _event_to_metadata(event: dict) -> dict:
     """Flatten event fields into ChromaDB-compatible metadata (strings only)."""
     return {
-        "title": event.get("title", ""),
-        "date": event.get("date", ""),
-        "start_time": event.get("start_time", ""),
-        "end_time": event.get("end_time", ""),
-        "type": event.get("type", ""),
-        "location": event.get("location", ""),
-        "attendees": event.get("attendees", ""),
+        "title":       event.get("title", ""),
+        "date":        event.get("date", ""),
+        "start_time":  event.get("start_time", ""),
+        "end_time":    event.get("end_time", ""),
+        "type":        event.get("type", ""),
+        "location":    event.get("location", ""),
+        "attendees":   event.get("attendees", ""),
         "description": event.get("description", ""),
     }
 
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────
 def ingest_events(events: list[dict], reset: bool = False) -> int:
-    """
-    Upsert a list of event dicts into ChromaDB.
-
-    Args:
-        events: List of event dicts (from sample_schedule.py or elsewhere).
-        reset:  If True, drop and recreate the collection first.
-
-    Returns:
-        Number of events ingested.
-    """
+    """Upsert a list of event dicts into ChromaDB."""
     global _collection
 
     if reset and _client is not None:
         _client.delete_collection(COLLECTION_NAME)
-        _collection = None   # force re-init
+        _collection = None
 
     col = get_collection()
-
-    ids = [e["id"] for e in events]
-    documents = [_event_to_doc(e) for e in events]
-    metadatas = [_event_to_metadata(e) for e in events]
-
-    col.upsert(ids=ids, documents=documents, metadatas=metadatas)
+    col.upsert(
+        ids=[e["id"] for e in events],
+        documents=[_event_to_doc(e) for e in events],
+        metadatas=[_event_to_metadata(e) for e in events],
+    )
     return len(events)
 
 
-# ── Retrieval (RAG) ───────────────────────────────────────────────────────────
+# ── Retrieval ─────────────────────────────────────────────────────────────────
 def query_events(query_text: str, top_k: int = DEFAULT_TOP_K,
                  where: dict | None = None) -> list[dict]:
     """
-    Semantic search over the schedule collection.
-
-    Args:
-        query_text: Natural-language query (e.g. "meetings on Friday afternoon").
-        top_k:      Number of results to return.
-        where:      Optional ChromaDB metadata filter, e.g. {"date": "2026-08-17"}.
-
-    Returns:
-        List of event dicts (metadata + id + distance).
+    Keyword search over all stored events.
+    Scores each document by how many query words appear in its text.
+    Falls back to returning all events if no keywords match.
     """
     col = get_collection()
-
-    kwargs: dict[str, Any] = {
-        "query_texts": [query_text],
-        "n_results": min(top_k, col.count() or 1),
-        "include": ["metadatas", "documents", "distances"],
-    }
+    kwargs: dict[str, Any] = {"include": ["metadatas", "documents"]}
     if where:
         kwargs["where"] = where
 
-    results = col.query(**kwargs)
+    results = col.get(**kwargs)
+    if not results["ids"]:
+        return []
 
-    events: list[dict] = []
-    if not results["ids"] or not results["ids"][0]:
-        return events
+    query_words = set(query_text.lower().split())
+    scored: list[tuple[int, str, dict]] = []
 
-    for i, eid in enumerate(results["ids"][0]):
-        meta = results["metadatas"][0][i]
-        events.append(
-            {
-                "id": eid,
-                "title": meta.get("title", ""),
-                "date": meta.get("date", ""),
-                "start_time": meta.get("start_time", ""),
-                "end_time": meta.get("end_time", ""),
-                "type": meta.get("type", ""),
-                "location": meta.get("location", ""),
-                "attendees": meta.get("attendees", ""),
-                "description": meta.get("description", ""),
-                "relevance_score": round(1 - results["distances"][0][i], 4),
-            }
-        )
+    for i, eid in enumerate(results["ids"]):
+        doc  = (results["documents"][i] or "").lower()
+        meta = results["metadatas"][i]
+        score = sum(1 for w in query_words if w in doc)
+        scored.append((score, eid, meta))
+
+    # Sort by score desc, then date asc
+    scored.sort(key=lambda x: (-x[0], x[2].get("date", ""), x[2].get("start_time", "")))
+
+    events = []
+    for score, eid, meta in scored[:top_k]:
+        events.append({
+            "id": eid,
+            "title":        meta.get("title", ""),
+            "date":         meta.get("date", ""),
+            "start_time":   meta.get("start_time", ""),
+            "end_time":     meta.get("end_time", ""),
+            "type":         meta.get("type", ""),
+            "location":     meta.get("location", ""),
+            "attendees":    meta.get("attendees", ""),
+            "description":  meta.get("description", ""),
+            "relevance_score": score,
+        })
     return events
 
 
@@ -185,25 +156,21 @@ def get_events_by_date(date_str: str) -> list[dict]:
     col = get_collection()
     results = col.get(where={"date": date_str}, include=["metadatas"])
 
-    events: list[dict] = []
+    events = []
     for i, eid in enumerate(results["ids"]):
         meta = results["metadatas"][i]
         events.append({"id": eid, **meta})
 
-    # Sort by start_time
     events.sort(key=lambda e: e.get("start_time", ""))
     return events
 
 
 def get_events_by_date_range(start_date: str, end_date: str) -> list[dict]:
-    """
-    Retrieve events between start_date and end_date (inclusive, YYYY-MM-DD).
-    ChromaDB doesn't support range queries natively, so we fetch all and filter.
-    """
+    """Retrieve all events between start_date and end_date inclusive."""
     col = get_collection()
     results = col.get(include=["metadatas"])
 
-    events: list[dict] = []
+    events = []
     for i, eid in enumerate(results["ids"]):
         meta = results["metadatas"][i]
         d = meta.get("date", "")
@@ -216,19 +183,13 @@ def get_events_by_date_range(start_date: str, end_date: str) -> list[dict]:
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 def add_event(event: dict) -> str:
-    """
-    Add a new event. Generates an ID if not provided.
-    Returns the event ID.
-    """
+    """Add a new event. Generates an ID if not provided. Returns the event ID."""
     col = get_collection()
 
     if not event.get("id"):
-        # Generate a simple unique ID
-        existing = col.get()
-        existing_ids = existing["ids"]
+        existing_ids = col.get()["ids"]
         idx = len(existing_ids) + 1
         event["id"] = f"evt_{idx:03d}"
-        # Ensure uniqueness
         while event["id"] in existing_ids:
             idx += 1
             event["id"] = f"evt_{idx:03d}"
@@ -242,10 +203,7 @@ def add_event(event: dict) -> str:
 
 
 def update_event(event_id: str, updates: dict) -> bool:
-    """
-    Update fields of an existing event.
-    Returns True if the event was found and updated, False otherwise.
-    """
+    """Update fields of an existing event. Returns True if found and updated."""
     col = get_collection()
     result = col.get(ids=[event_id], include=["metadatas"])
 
@@ -264,13 +222,9 @@ def update_event(event_id: str, updates: dict) -> bool:
 
 
 def delete_event(event_id: str) -> bool:
-    """
-    Delete an event by ID.
-    Returns True if deleted, False if not found.
-    """
+    """Delete an event by ID. Returns True if deleted."""
     col = get_collection()
-    result = col.get(ids=[event_id])
-    if not result["ids"]:
+    if not col.get(ids=[event_id])["ids"]:
         return False
     col.delete(ids=[event_id])
     return True
@@ -278,22 +232,18 @@ def delete_event(event_id: str) -> bool:
 
 def find_event_by_title_and_date(title_fragment: str,
                                   date_str: str | None = None) -> list[dict]:
-    """
-    Fuzzy find events whose title contains title_fragment on an optional date.
-    Used by the update tool to locate events without knowing their ID.
-    """
+    """Find events whose title contains title_fragment on an optional date."""
     col = get_collection()
-    where = {"date": date_str} if date_str else None
     kwargs: dict[str, Any] = {"include": ["metadatas"]}
-    if where:
-        kwargs["where"] = where
+    if date_str:
+        kwargs["where"] = {"date": date_str}
     results = col.get(**kwargs)
 
-    matches: list[dict] = []
-    fragment_lower = title_fragment.lower()
+    matches = []
+    frag = title_fragment.lower()
     for i, eid in enumerate(results["ids"]):
         meta = results["metadatas"][i]
-        if fragment_lower in meta.get("title", "").lower():
+        if frag in meta.get("title", "").lower():
             matches.append({"id": eid, **meta})
     return matches
 
