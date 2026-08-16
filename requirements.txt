@@ -1,9 +1,9 @@
 # Core LLM / Agent framework
 langgraph==1.0.0
 langgraph-prebuilt==1.0.0
-langchain==0.3.25
-langchain-core==0.3.60
-langchain-openai==0.3.17
+langchain>=0.3.25
+langchain-core>=0.3.67
+langchain-openai>=0.3.17
 
 # Vector store
 chromadb==0.5.23
