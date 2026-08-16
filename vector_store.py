@@ -17,7 +17,7 @@ import json
 from typing import Any
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,7 +25,7 @@ load_dotenv()
 # ── Configuration ─────────────────────────────────────────────────────────────
 CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
 COLLECTION_NAME: str = "schedule_events"
-EMBED_MODEL: str = "all-MiniLM-L6-v2"   # fast, lightweight, runs locally
+EMBED_MODEL: str = "text-embedding-3-small"  # cheap, fast, no local RAM needed
 DEFAULT_TOP_K: int = 5
 
 # ── Singleton client & collection ─────────────────────────────────────────────
@@ -33,9 +33,12 @@ _client: chromadb.PersistentClient | None = None
 _collection: chromadb.Collection | None = None
 
 
-def _embed_fn() -> SentenceTransformerEmbeddingFunction:
-    """Return (cached) SentenceTransformer embedding function."""
-    return SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
+def _embed_fn() -> OpenAIEmbeddingFunction:
+    """Return OpenAI embedding function (uses OPENAI_API_KEY env var)."""
+    return OpenAIEmbeddingFunction(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model_name=EMBED_MODEL,
+    )
 
 
 def get_collection() -> chromadb.Collection:
