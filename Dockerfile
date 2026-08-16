@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
+# Cache bust: update this date to force pip reinstall
+ARG CACHE_BUST=2026-08-16-v5
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
@@ -30,7 +32,7 @@ RUN mkdir -p /app/chroma_db
 
 # Environment defaults (override via Render environment variables)
 ENV CHROMA_PERSIST_DIR=/app/chroma_db
-ENV OPENAI_MODEL=gpt-4o-mini
+ENV GEMINI_MODEL=gemini-1.5-flash
 ENV PORT=8000
 
 # Expose port
