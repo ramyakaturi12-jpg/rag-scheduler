@@ -8,9 +8,6 @@ langchain-google-genai>=2.0.0
 # Vector store
 chromadb==0.5.23
 
-# Google new SDK for embeddings (free tier, replaces google-generativeai)
-google-genai>=1.0.0
-
 # API server
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
