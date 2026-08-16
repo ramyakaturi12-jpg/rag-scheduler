@@ -27,7 +27,7 @@ from tools import get_schedule, update_schedule
 load_dotenv()
 
 # ── LLM (Gemini — free tier) ──────────────────────────────────────────────────
-_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest")
+_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 
 _llm = ChatGoogleGenerativeAI(
     model=_MODEL,
