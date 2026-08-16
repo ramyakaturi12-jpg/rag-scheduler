@@ -18,7 +18,7 @@ from typing import Any
 
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Embeddings
-from openai import OpenAI
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,7 +26,7 @@ load_dotenv()
 # ── Configuration ─────────────────────────────────────────────────────────────
 CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
 COLLECTION_NAME: str = "schedule_events"
-EMBED_MODEL: str = "text-embedding-3-small"  # cheap, fast, no local RAM needed
+EMBED_MODEL: str = "models/text-embedding-004"  # Google free embedding model
 DEFAULT_TOP_K: int = 5
 
 # ── Singleton client & collection ─────────────────────────────────────────────
@@ -34,23 +34,27 @@ _client: chromadb.PersistentClient | None = None
 _collection: chromadb.Collection | None = None
 
 
-class OpenAIEmbedder(EmbeddingFunction):
-    """Custom embedding function using openai >= 1.0 client."""
+class GeminiEmbedder(EmbeddingFunction):
+    """Embedding function using Google Gemini free API."""
 
     def __init__(self):
-        self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
     def __call__(self, input: list[str]) -> Embeddings:
-        response = self._client.embeddings.create(
-            input=input,
-            model=EMBED_MODEL,
-        )
-        return [item.embedding for item in response.data]
+        result = []
+        for text in input:
+            response = genai.embed_content(
+                model=EMBED_MODEL,
+                content=text,
+                task_type="retrieval_document",
+            )
+            result.append(response["embedding"])
+        return result
 
 
-def _embed_fn() -> OpenAIEmbedder:
-    """Return a fresh OpenAIEmbedder instance."""
-    return OpenAIEmbedder()
+def _embed_fn() -> GeminiEmbedder:
+    """Return a fresh GeminiEmbedder instance."""
+    return GeminiEmbedder()
 
 
 def get_collection() -> chromadb.Collection:
