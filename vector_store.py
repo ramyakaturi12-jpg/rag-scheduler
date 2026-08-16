@@ -17,7 +17,8 @@ import json
 from typing import Any
 
 import chromadb
-from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+from chromadb.api.types import EmbeddingFunction, Embeddings
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,12 +34,23 @@ _client: chromadb.PersistentClient | None = None
 _collection: chromadb.Collection | None = None
 
 
-def _embed_fn() -> OpenAIEmbeddingFunction:
-    """Return OpenAI embedding function (uses OPENAI_API_KEY env var)."""
-    return OpenAIEmbeddingFunction(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model_name=EMBED_MODEL,
-    )
+class OpenAIEmbedder(EmbeddingFunction):
+    """Custom embedding function using openai >= 1.0 client."""
+
+    def __init__(self):
+        self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    def __call__(self, input: list[str]) -> Embeddings:
+        response = self._client.embeddings.create(
+            input=input,
+            model=EMBED_MODEL,
+        )
+        return [item.embedding for item in response.data]
+
+
+def _embed_fn() -> OpenAIEmbedder:
+    """Return a fresh OpenAIEmbedder instance."""
+    return OpenAIEmbedder()
 
 
 def get_collection() -> chromadb.Collection:
