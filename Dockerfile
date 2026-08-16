@@ -32,7 +32,7 @@ RUN mkdir -p /app/chroma_db
 
 # Environment defaults (override via Render environment variables)
 ENV CHROMA_PERSIST_DIR=/app/chroma_db
-ENV GEMINI_MODEL=gemini-1.5-flash
+ENV GEMINI_MODEL=gemini-2.0-flash
 ENV PORT=8000
 
 # Expose port
