@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: schedule-assistant
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free              # change to "starter" for always-on
+    region: oregon
+
+    # Render automatically injects PORT; we read it in CMD
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false         # set this manually in the Render dashboard
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: CHROMA_PERSIST_DIR
+        value: /app/chroma_db
+
+    # Persistent disk for ChromaDB (only available on paid plans)
+    # Uncomment when upgrading from the free tier:
+    # disk:
+    #   name: chroma-data
+    #   mountPath: /app/chroma_db
+    #   sizeGB: 1
+
+    healthCheckPath: /health
