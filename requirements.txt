@@ -5,7 +5,7 @@ langchain>=0.3.25
 langchain-core>=0.3.67
 langchain-google-genai>=2.0.0
 
-# Vector store
+# Vector store (no embedding API needed — uses keyword search)
 chromadb==0.5.23
 
 # API server
