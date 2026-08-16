@@ -27,7 +27,7 @@ load_dotenv()
 # ── Configuration ─────────────────────────────────────────────────────────────
 CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
 COLLECTION_NAME: str = "schedule_events"
-EMBED_MODEL: str = "text-embedding-004"  # Google new SDK model name
+EMBED_MODEL: str = "gemini-embedding-exp-03-07"  # Google free embedding model (new SDK)
 DEFAULT_TOP_K: int = 5
 
 # ── Singleton client & collection ─────────────────────────────────────────────
