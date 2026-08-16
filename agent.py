@@ -19,8 +19,7 @@ from datetime import date
 from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import MessageState
+from langgraph.graph import StateGraph, START, END, MessagesState as MessageState
 from langgraph.prebuilt import ToolNode
 
 from tools import get_schedule, update_schedule
